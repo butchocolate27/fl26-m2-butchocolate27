@@ -11,7 +11,7 @@ Identify one place in your M2 implementation where runtime polymorphism occurs. 
 
 Then explain what would change if the relevant operation were not declared `virtual`.
 
-In `ProcessingCore::search`, `impl_->retrieval` has type `std::unique_ptr<RetrievalStrategy>`. Its `search` call goes through that base interface. The default object is a `RetrievalEngine`, while `test_injected_pipeline_rebuild_and_moves` supplies a `MarkerRetrieval`. Since `RetrievalStrategy::search` is virtual and the actual object is `MarkerRetrieval`, the call reaches `MarkerRetrieval::search` and returns its score of 42.0. The core does not need to know that derived class's name. If the base operation were not virtual, the derived method's `override` would fail to compile. With an ordinary nonvirtual base method instead, a call through the base pointer would use the base method rather than the selected derived method.
+One example is `ProcessingCore::search`. It calls `impl_->retrieval->search(...)`. The pointer has type `std::unique_ptr<RetrievalStrategy>`, but the object inside can be a `RetrievalEngine` or another derived class. In my test, I pass in `MarkerRetrieval`, and the search returns its score of 42.0. That shows the call reached the object I passed in. This works because `RetrievalStrategy::search` is virtual. Without `virtual`, the `override` in `MarkerRetrieval` would not compile. If the base class had a regular nonvirtual function instead, a call through the base pointer would use that base function.
 
 ## 2. Ownership and lifetime - 1.5 points
 
@@ -19,7 +19,9 @@ Identify where one of the strategy objects is created, where ownership is transf
 
 Also explain why `ProcessingCore` is move-only and why the strategy base classes require virtual destructors.
 
-In the test, `std::make_unique<MarkerRetrieval>(counts)` creates a strategy. The constructor call transfers its `unique_ptr` into `ProcessingCore`; the constructor checks all three arguments and moves them into `ProcessingCore::Impl`. That `Impl` owns the strategies until the core is destroyed or its ownership is moved to another core. In the move test, move construction and move assignment transfer the same `Impl`; the destruction counters show that each injected strategy is destroyed once at the end of the scope. `ProcessingCore` cannot be copied because that would imply copying its uniquely owned strategies, and there is no cloning contract. The virtual destructors make deletion through each `unique_ptr` to a base strategy safe, so the derived destructor runs.
+In `test_injected_pipeline_rebuild_and_moves`, I create a `MarkerRetrieval` with `std::make_unique`. I pass it to the `ProcessingCore` constructor. The constructor checks that none of the three pointers is null, then moves them into `Impl`. From that point, the core owns them. `std::unique_ptr` makes it clear that each strategy has one owner. The strategies are destroyed when the owning core is destroyed, or when move assignment replaces its old `Impl`.
+
+I also move the core in the test. The counters show that the injected strategies are each destroyed once. Copying `ProcessingCore` is disabled because its owned strategies cannot just be copied. The base classes need virtual destructors so deleting a strategy through a base pointer also runs the derived class destructor.
 
 ## 3. Architecture, extensibility, and M1 compatibility - 1.5 points
 
@@ -31,7 +33,9 @@ Identify the classes or interfaces involved and explain both:
 
 Include one plausible design alternative and explain why the M2 design is preferable for this milestone. The alternative does not need to be something you actually implemented.
 
-I started with my M1 source files for text processing, chunking, indexing, retrieval, and context building. The default `ProcessingCore` constructor still creates `Chunker`, `RetrievalEngine`, and `ContextBuilder`, so the normal M1 behavior stays in place. I also made `ContextBuilder` skip repeated chunk IDs, as required for the context output. Both constructors store the selected objects in `Impl`, and `rebuild`, `search`, and `build_context` use the three strategy interfaces. A caller can supply a different derived class without changing these core methods. Another option would be an enum and a switch inside `ProcessingCore`, but then I would have to edit the core for every new algorithm. The strategy interfaces avoid that.
+I used my M1 code as the starting point. The default constructor still creates `Chunker`, `RetrievalEngine`, and `ContextBuilder`, so a normal `ProcessingCore` still uses the M1 processing steps. I made `ContextBuilder` skip repeated chunk IDs too.
+
+For M2, `Impl` stores those objects through the three strategy interfaces. `rebuild` calls the selected chunker, `search` calls the selected retrieval strategy, and `build_context` calls the selected context strategy. I can pass different objects to the other constructor without changing how someone uses `ProcessingCore`. I could have used an enum and `switch` statements instead, but then each new strategy would require changes inside `ProcessingCore`. Keeping the interfaces separate makes adding one simpler.
 
 ## 4. Testing and defect reasoning - 1.5 points
 
@@ -44,4 +48,6 @@ Explain:
 
 If your test uses a custom strategy, explain how its observable behavior demonstrates that `ProcessingCore` is actually using runtime substitution.
 
-`test_injected_pipeline_rebuild_and_moves` checks the full custom path. `MarkerChunker` creates a chunk with a `#marker` ID and the word `marker`; `MarkerRetrieval` verifies that the new chunk was indexed and returns score 42.0 even for a query with no default match; `MarkerContext` returns the text `selected`. Those outputs could not come from the default M1 implementations, so the test detects a core that stores the injected strategies but still calls the concrete defaults. The same test also checks that a rebuild with duplicate document IDs throws while the old searchable corpus remains available. Its move and destruction checks can detect lost ownership or duplicate deletion. The public tests have a basic injection check, but they do not follow a failed rebuild and both move operations through this custom pipeline.
+I chose `test_injected_pipeline_rebuild_and_moves`. It passes three custom strategies to `ProcessingCore`. `MarkerChunker` makes a chunk with a `#marker` ID. `MarkerRetrieval` checks that this chunk was indexed and returns a score of 42.0, even for a query that would not match the M1 search. `MarkerContext` returns the text `selected`. If the core still called the default M1 classes, these checks would fail.
+
+The test also tries a rebuild with duplicate document IDs and checks that the old corpus still works. Then it moves the core and checks that each strategy is destroyed once. The public tests check basic injection, but this test also checks the index, failed rebuild, and moves together.
