@@ -33,9 +33,9 @@ Identify the classes or interfaces involved and explain both:
 
 Include one plausible design alternative and explain why the M2 design is preferable for this milestone. The alternative does not need to be something you actually implemented.
 
-I used my M1 code as the starting point. The default constructor still creates 'Chunker', 'RetrievalEngine', and 'ContextBuilder', so a normal 'ProcessingCore' still uses the M1 processing steps. I made 'ContextBuilder' skip repeated chunk IDs too.
+In M1, ProcessingCore directly kept a Chunker, RetrievalEngine, and ContextBuilder. In M2, Impl keeps them through ChunkingStrategy, RetrievalStrategy, and ContextStrategy. The default constructor still creates the M1 classes, so rebuild, search, and build_context work the same way as before. The other constructor lets me pass in my own strategies without changing those calls.
 
-For M2, 'Impl' stores those objects through the three strategy interfaces. 'rebuild' calls the selected chunker, 'search' calls the selected retrieval strategy, and 'build_context' calls the selected context strategy. I can pass different objects to the other constructor without changing how someone uses 'ProcessingCore'. I could have used an enum and 'switch' statements instead, but then each new strategy would require changes inside 'ProcessingCore'. Keeping the interfaces separate makes adding one simpler.
+Another way would be an enum with switch statements in ProcessingCore. That would work, but I would need to edit the core each time I added an algorithm. The strategy interfaces let me add one as a separate class.
 
 ## 4. Testing and defect reasoning - 1.5 points
 
@@ -48,6 +48,6 @@ Explain:
 
 If your test uses a custom strategy, explain how its observable behavior demonstrates that 'ProcessingCore' is actually using runtime substitution.
 
-I chose 'test_injected_pipeline_rebuild_and_moves'. It passes three custom strategies to 'ProcessingCore'. 'MarkerChunker' makes a chunk with a '#marker' ID. 'MarkerRetrieval' checks that this chunk was indexed and returns a score of 42.0, even for a query that would not match the M1 search. 'MarkerContext' returns the text 'selected'. If the core still called the default M1 classes, these checks would fail.
+In test_injected_pipeline_rebuild_and_moves, I pass ProcessingCore three small test strategies. MarkerChunker adds '#marker' to the chunk ID. MarkerRetrieval checks that the chunk was indexed and returns 42.0 for a query the M1 search would not match. MarkerContext returns 'selected'. If ProcessingCore called one of the M1 classes instead, these checks would fail.
 
-The test also tries a rebuild with duplicate document IDs and checks that the old corpus still works. Then it moves the core and checks that each strategy is destroyed once. The public tests check basic injection, but this test also checks the index, failed rebuild, and moves together.
+The same test tries a rebuild with duplicate document IDs. It should throw, and the old chunk should still be searchable. Then I move the core and check that each strategy is destroyed once. The public tests check basic injection; my test also checks the index, a failed rebuild, and ownership after a move.
